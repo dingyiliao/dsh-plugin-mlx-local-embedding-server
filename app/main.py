@@ -146,6 +146,7 @@ def create_app(
             from app.embeddings import embed_texts
 
             embed_fn = embed_texts
+            embed_fn(["warmup"])  # 启动时即加载 embedding 模型，加载失败直接拒绝启动
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         app.state.pipeline = RagPipeline(
             store=VectorStore(db_path, dim=dim), embed_fn=embed_fn
