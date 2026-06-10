@@ -11,3 +11,8 @@ dependencies = [
     "mlx-vlm>=0.6.2",
     "sqlite-vec>=0.1.9",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
