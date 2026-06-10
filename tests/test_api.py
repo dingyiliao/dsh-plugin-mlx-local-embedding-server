@@ -1,10 +1,18 @@
 # tests/test_api.py
 import base64
+import os
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+
+PNG_1PX_B64 = base64.b64encode(
+    base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQAB"
+        "h6FO1AAAAABJRU5ErkJggg=="
+    )
+).decode()
 
 
 def fake_embed(texts):
@@ -21,13 +29,19 @@ class FakeVlm:
         yield "世界"
 
     def reply(self, messages, images=None, max_tokens=1024):
+        self.last_images = images
         return "".join(self.stream(messages, images, max_tokens))
 
 
 @pytest.fixture()
-def client(tmp_path):
+def fake_vlm():
+    return FakeVlm()
+
+
+@pytest.fixture()
+def client(tmp_path, fake_vlm):
     app = create_app(
-        db_path=str(tmp_path / "api.db"), dim=4, embed_fn=fake_embed, vlm=FakeVlm()
+        db_path=str(tmp_path / "api.db"), dim=4, embed_fn=fake_embed, vlm=fake_vlm
     )
     with TestClient(app) as c:
         yield c
@@ -92,13 +106,7 @@ def test_chat_with_rag(client):
     assert body["sources"][0]["source"] == "cat.txt"
 
 
-def test_chat_with_base64_image(client, tmp_path):
-    png_1px = base64.b64encode(
-        base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQAB"
-            "h6FO1AAAAABJRU5ErkJggg=="
-        )
-    ).decode()
+def test_chat_with_base64_image(client, fake_vlm):
     r = client.post(
         "/v1/chat/completions",
         json={
@@ -109,7 +117,7 @@ def test_chat_with_base64_image(client, tmp_path):
                         {"type": "text", "text": "这是什么？"},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{png_1px}"},
+                            "image_url": {"url": f"data:image/png;base64,{PNG_1PX_B64}"},
                         },
                     ],
                 }
@@ -118,6 +126,30 @@ def test_chat_with_base64_image(client, tmp_path):
     )
     assert r.status_code == 200
     assert r.json()["choices"][0]["message"]["content"] == "你好世界"
+    assert fake_vlm.last_images is not None and len(fake_vlm.last_images) == 1
+
+
+def test_base64_image_temp_file_cleaned_up(client, fake_vlm):
+    r = client.post(
+        "/v1/chat/completions",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "这是什么？"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{PNG_1PX_B64}"},
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200
+    assert fake_vlm.last_images is not None
+    assert all(not os.path.exists(p) for p in fake_vlm.last_images)
 
 
 def test_chat_bad_image_returns_400(client):
@@ -136,5 +168,13 @@ def test_chat_bad_image_returns_400(client):
                 }
             ]
         },
+    )
+    assert r.status_code == 400
+
+
+def test_ingest_bad_overlap_returns_400(client):
+    r = client.post(
+        "/ingest",
+        json={"text": "abc", "source": "x", "chunk_size": 64, "overlap": 64},
     )
     assert r.status_code == 400

@@ -9,8 +9,9 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from app.models import EMBED_DIM
 from app.rag import RagPipeline
@@ -62,18 +63,32 @@ def _decode_data_url(url: str) -> str:
 def _parse_messages(messages: list[dict]) -> tuple[list[dict], list[str]]:
     """把 OpenAI 多模态 content 拆成 (纯文本 messages, 图片路径列表)。"""
     parsed, images = [], []
-    for m in messages:
-        content = m.get("content", "")
-        if isinstance(content, list):
-            texts = []
-            for part in content:
-                if part.get("type") == "text":
-                    texts.append(part["text"])
-                elif part.get("type") == "image_url":
-                    images.append(_decode_data_url(part["image_url"]["url"]))
-            content = "\n".join(texts)
-        parsed.append({"role": m["role"], "content": content})
+    try:
+        for m in messages:
+            content = m.get("content", "")
+            if isinstance(content, list):
+                texts = []
+                for part in content:
+                    if part.get("type") == "text":
+                        texts.append(part["text"])
+                    elif part.get("type") == "image_url":
+                        images.append(_decode_data_url(part["image_url"]["url"]))
+                content = "\n".join(texts)
+            parsed.append({"role": m["role"], "content": content})
+    except HTTPException:
+        # Clean up any temp files already written before re-raising
+        temp_files = [p for p in images if not p.startswith(("http://", "https://"))]
+        for p in temp_files:
+            if os.path.exists(p):
+                os.unlink(p)
+        raise
     return parsed, images
+
+
+def _cleanup(paths: list[str]) -> None:
+    for p in paths:
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 def _completion_body(text: str, model: str, sources: list[dict] | None = None) -> dict:
@@ -95,14 +110,17 @@ def _completion_body(text: str, model: str, sources: list[dict] | None = None) -
     return body
 
 
-def _sse_chunk(piece: str, model: str) -> str:
+def _sse_chunk(piece: str, model: str, stream_id: str, first: bool = False) -> str:
+    delta: dict = {"content": piece}
+    if first:
+        delta["role"] = "assistant"
     return "data: " + json.dumps(
         {
-            "id": "chatcmpl-stream",
+            "id": stream_id,
             "object": "chat.completion.chunk",
             "created": int(time.time()),
             "model": model,
-            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
+            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
         },
         ensure_ascii=False,
     ) + "\n\n"
@@ -153,9 +171,12 @@ def create_app(
 
     @app.post("/ingest")
     async def ingest(req: IngestRequest):
-        n = app.state.pipeline.ingest(
-            req.text, source=req.source, chunk_size=req.chunk_size, overlap=req.overlap
-        )
+        try:
+            n = app.state.pipeline.ingest(
+                req.text, source=req.source, chunk_size=req.chunk_size, overlap=req.overlap
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         return {"chunks_added": n, "total_chunks": app.state.pipeline.store.count()}
 
     @app.post("/query")
@@ -165,26 +186,49 @@ def create_app(
     @app.post("/v1/chat/completions")
     async def chat(req: ChatRequest):
         messages, images = _parse_messages(req.messages)
+        temp_files = [p for p in images if not p.startswith(("http://", "https://"))]
         model_name = req.model or "qwen2.5-vl-7b"
         sources = None
         if req.use_rag and messages:
             question = messages[-1]["content"]
             prompt, sources = app.state.pipeline.augment(question, top_k=req.rag_top_k)
-            messages = messages[:-1] + [{"role": "user", "content": prompt}]
+            messages = messages[:-1] + [{"role": messages[-1]["role"], "content": prompt}]
 
         vlm_instance = app.state.get_vlm()
         if not req.stream:
             text = vlm_instance.reply(messages, images=images, max_tokens=req.max_tokens)
-            return _completion_body(text, model_name, sources)
+            return JSONResponse(
+                content=_completion_body(text, model_name, sources),
+                background=BackgroundTask(_cleanup, temp_files),
+            )
+
+        stream_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
         def event_stream():
+            first = True
             for piece in vlm_instance.stream(
                 messages, images=images, max_tokens=req.max_tokens
             ):
-                yield _sse_chunk(piece, model_name)
+                yield _sse_chunk(piece, model_name, stream_id, first=first)
+                first = False
+            # Final chunk: finish_reason + sources
+            final: dict = {
+                "id": stream_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            if sources is not None:
+                final["sources"] = sources
+            yield "data: " + json.dumps(final, ensure_ascii=False) + "\n\n"
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            background=BackgroundTask(_cleanup, temp_files),
+        )
 
     return app
 
