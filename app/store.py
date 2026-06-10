@@ -5,7 +5,7 @@ import sqlite_vec
 
 
 class VectorStore:
-    """sqlite-vec 向量库：存 (向量, 原文, 来源)，按余弦距离检索。"""
+    """sqlite-vec 向量库：存 (向量, 原文, 来源)，按 L2 距离检索（向量已归一化时排序等价余弦）。"""
 
     def __init__(self, path: str, dim: int = 1024):
         self.dim = dim
@@ -25,7 +25,7 @@ class VectorStore:
         )
 
     def add(self, texts: list[str], vectors: list[list[float]], source: str) -> int:
-        with self._lock:
+        with self._lock, self.db:
             for text, vec in zip(texts, vectors, strict=True):
                 cur = self.db.execute(
                     "insert into chunks(text, source) values (?, ?)", (text, source)
@@ -34,7 +34,6 @@ class VectorStore:
                     "insert into chunks_vec(rowid, embedding) values (?, ?)",
                     (cur.lastrowid, sqlite_vec.serialize_float32(list(vec))),
                 )
-            self.db.commit()
         return len(texts)
 
     def search(self, vector: list[float], top_k: int = 4) -> list[dict]:

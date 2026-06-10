@@ -1,3 +1,5 @@
+import pytest
+
 from app.store import VectorStore
 
 
@@ -35,3 +37,13 @@ def test_persistence(tmp_path):
     VectorStore(path, dim=4).add(["猫"], [[1, 0, 0, 0]], source="a")
     s2 = VectorStore(path, dim=4)
     assert s2.count() == 1
+
+
+def test_failed_add_rolls_back(tmp_path):
+    s = make_store(tmp_path)
+    with pytest.raises(ValueError):
+        s.add(["a", "b", "c"], [[1, 0, 0, 0], [0, 1, 0, 0]], source="x")
+    # 失败的 add 不应留下任何行；后续 add 也不应把残留行带进来
+    s.add(["猫"], [[1, 0, 0, 0]], source="ok")
+    assert s.count() == 1
+    assert [r["text"] for r in s.search([1, 0, 0, 0], top_k=10)] == ["猫"]
