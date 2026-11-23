@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from app.models import EMBED_DIM
+from app.models import EMBED_DIM, EMBED_MODEL, VLM_MODEL
 from app.rag import RagPipeline
 from app.store import VectorStore
 
@@ -155,6 +155,18 @@ def create_app(
         yield
 
     app = FastAPI(title="mlx-lm-local-demo", lifespan=lifespan)
+
+    @app.get("/v1/models")
+    async def models():
+        # OpenAI-compatible model listing. Clients use it to confirm the model
+        # id they configured is actually served before sending inputs.
+        return {
+            "object": "list",
+            "data": [
+                {"id": EMBED_MODEL, "object": "model", "owned_by": "local"},
+                {"id": VLM_MODEL, "object": "model", "owned_by": "local"},
+            ],
+        }
 
     @app.post("/v1/embeddings")
     async def embeddings(req: EmbeddingsRequest):
