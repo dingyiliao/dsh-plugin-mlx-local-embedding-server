@@ -1,10 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-shell'
+import { spawn } from 'node:child_process'
 
 /** MLX server process manager for DSH. */
 export const name = 'mlx-local'
-export const inject = ['shell']
+export const inject: string[] = []
 
 /** Configuration for the MLX FastAPI server process. */
 export interface Config {
@@ -24,7 +24,7 @@ export const Config: z<Config> = z.object({
 
 type ResolvedConfig = Required<Config>
 
-/** Start the MLX server and let the shell service own its process lifetime. */
+/** Start the MLX server as a native child process, outside DSH shell execution. */
 export function apply(ctx: Context, config: Config): void {
   const resolved = config as ResolvedConfig
   const baseURL = resolved.baseURL.trim().replace(/\/$/, '')
@@ -32,30 +32,18 @@ export function apply(ctx: Context, config: Config): void {
   if (!resolved.command.trim()) throw new Error('mlx-local: command must not be empty')
   if (!resolved.workdir.trim()) throw new Error('mlx-local: workdir must not be empty')
 
-  const server = ctx.shell.resolve({
-    command: resolved.command,
-    workdir: resolved.workdir,
-    timeoutMs: 2147000000,
-    onExpiry: 'none',
+  const child = spawn('/bin/zsh', ['-lc', resolved.command], {
+    cwd: resolved.workdir,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env },
   })
-  const executionPromise = ctx.shell.execute(server)
+  child.stdout?.on('data', data => ctx.logger.info('mlx-local: ' + String(data).trimEnd()))
+  child.stderr?.on('data', data => ctx.logger.warn('mlx-local: ' + String(data).trimEnd()))
+  child.on('error', error => ctx.logger.error('mlx-local native server failed to start: ' + String(error)))
+  child.on('exit', (code, signal) => {
+    if (code !== 0) ctx.logger.error(`mlx-local native server exited (code=${code}, signal=${signal})`)
+  })
   ctx.effect(() => async () => {
-    try {
-      const process = await executionPromise
-      process.kill()
-      await process.done
-    } catch (error) {
-      ctx.logger.error('mlx-local server cleanup failed: ' + String(error))
-    }
-  })
-  void executionPromise.then(async execution => {
-    try {
-      const result = await execution.result()
-      if (result.exitCode !== 0) ctx.logger.error('mlx-local server exited with code ' + String(result.exitCode))
-    } catch (error) {
-      ctx.logger.error('mlx-local server process failed: ' + String(error))
-    }
-  }).catch(error => {
-    ctx.logger.error('mlx-local server failed to start: ' + String(error))
+    if (!child.killed) child.kill('SIGTERM')
   })
 }
