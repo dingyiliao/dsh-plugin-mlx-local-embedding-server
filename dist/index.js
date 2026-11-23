@@ -30,16 +30,23 @@ export function apply(ctx, config) {
     child.stdout?.on('data', data => ctx.logger.info('mlx-local: ' + String(data).trimEnd()));
     child.stderr?.on('data', data => ctx.logger.warn('mlx-local: ' + String(data).trimEnd()));
     child.on('error', error => ctx.logger.error('mlx-local native server failed to start: ' + String(error)));
+    let stopping = false;
     child.on('exit', (code, signal) => {
-        if (code === 0) {
+        if (stopping) {
+            ctx.logger.info('mlx-local server stopped during plugin unload');
+        }
+        else if (code === 0) {
             ctx.logger.info('mlx-local server exited normally');
         }
         else {
             ctx.logger.error(`mlx-local native server exited (code=${code}, signal=${signal})`);
+            // Reserved: request plugin unload through a public lifecycle API when available.
         }
-        // Reserved: request plugin unload through a public lifecycle API when available.
     });
-    // Intentionally do not kill the child during plugin disposal. The server owns
-    // its process lifetime after startup; exit handling above only records status.
+    ctx.effect(() => async () => {
+        stopping = true;
+        if (!child.killed)
+            child.kill('SIGTERM');
+    });
 }
 //# sourceMappingURL=index.js.map
