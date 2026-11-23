@@ -1,6 +1,6 @@
 # DSH MLX local
 
-Run the local MLX embedding/RAG FastAPI server as a managed process of DeepSeek Harness.
+Run the local MLX embedding/RAG FastAPI server as a managed process of DeepSeek Harness on macOS only. MLX requires Apple Silicon/macOS; on other platforms the plugin logs a warning and does not start the server.
 
 The plugin starts the server when applied. When the plugin enters pending or unloads, the DSH shell/subprocess lifecycle closes the process. This plugin does not register model-facing MLX tools or provide an internal HTTP proxy.
 
