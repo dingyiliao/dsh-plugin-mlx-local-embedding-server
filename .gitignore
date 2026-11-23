@@ -15,6 +15,7 @@ data/
 # Local media and generated audio
 *.wav
 tts-voice-clone/output/
+tts-voice-clone/
 tts-voice-clone/reference/*.wav
 .DS_Store
 
