@@ -10,6 +10,10 @@ export const Config = z.object({
 });
 /** Start the MLX server as a native child process, outside DSH shell execution. */
 export function apply(ctx, config) {
+    if (process.platform !== 'darwin') {
+        ctx.logger.warn(`mlx-local: unsupported platform ${process.platform}; MLX requires macOS, server not started`);
+        return;
+    }
     const resolved = config;
     const baseURL = resolved.baseURL.trim().replace(/\/$/, '');
     if (!baseURL || !/^https?:\/\//.test(baseURL))

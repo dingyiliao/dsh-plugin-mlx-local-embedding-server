@@ -26,6 +26,10 @@ type ResolvedConfig = Required<Config>
 
 /** Start the MLX server as a native child process, outside DSH shell execution. */
 export function apply(ctx: Context, config: Config): void {
+  if (process.platform !== 'darwin') {
+    ctx.logger.warn(`mlx-local: unsupported platform ${process.platform}; MLX requires macOS, server not started`)
+    return
+  }
   const resolved = config as ResolvedConfig
   const baseURL = resolved.baseURL.trim().replace(/\/$/, '')
   if (!baseURL || !/^https?:\/\//.test(baseURL)) throw new Error('mlx-local: baseURL must be a non-empty http(s) URL')

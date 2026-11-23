@@ -1,6 +1,6 @@
 # DSH MLX 本地插件
 
-把 Apple Silicon 上的本地 MLX embedding/RAG FastAPI 服务作为独立进程接入 DeepSeek Harness。
+仅在 macOS 上把 Apple Silicon 本地 MLX embedding/RAG FastAPI 服务作为独立进程接入 DeepSeek Harness。MLX 依赖 Apple Silicon/macOS；在其他平台插件会记录警告并不启动服务。
 
 插件应用时启动服务进程，插件进入 pending 或卸载时由 DSH shell/subprocess 生命周期关闭该进程。本插件不向模型注册 MLX 工具，也不提供内部 HTTP 代理。
 
