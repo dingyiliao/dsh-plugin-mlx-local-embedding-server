@@ -38,7 +38,17 @@ export function apply(ctx: Context, config: Config): void {
     timeoutMs: 2147000000,
     onExpiry: 'none',
   })
-  void ctx.shell.execute(server).then(async execution => {
+  const executionPromise = ctx.shell.execute(server)
+  ctx.effect(() => async () => {
+    try {
+      const process = await executionPromise
+      process.kill()
+      await process.done
+    } catch (error) {
+      ctx.logger.error('mlx-local server cleanup failed: ' + String(error))
+    }
+  })
+  void executionPromise.then(async execution => {
     try {
       const result = await execution.result()
       if (result.exitCode !== 0) ctx.logger.error('mlx-local server exited with code ' + String(result.exitCode))
