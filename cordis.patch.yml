@@ -1,0 +1,3 @@
+- insert:
+    - id: mlx-local
+      name: '@local/dsh-mlx-local'

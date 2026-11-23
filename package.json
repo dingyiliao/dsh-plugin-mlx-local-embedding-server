@@ -1,0 +1,43 @@
+{
+  "name": "@local/dsh-mlx-local",
+  "version": "0.1.0",
+  "description": "Use a local Apple Silicon MLX multimodal RAG service from DeepSeek Harness",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc --outDir dist --declaration --declarationMap --sourceMap --module NodeNext --moduleResolution NodeNext --target ESNext --strict --skipLibCheck src/index.ts",
+    "check": "node --check dist/index.js",
+    "test": "npm run build && npm run check"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.3 <0.3.0",
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0 <5",
+    "@deepseek-ai/dsh-shell": ">=0.2.3-alpha.2 <0.3.0",
+    "@deepseek-ai/schemastery": ">=3.0.0 <4"
+  },
+  "license": "MIT"
+}
